@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, dialog, clipboard } from 'electron';
+import { app, BrowserWindow, ipcMain, dialog, clipboard, session } from 'electron';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import fs from 'node:fs/promises';
@@ -11,6 +11,8 @@ const execFileAsync = promisify(execFile);
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const isDev = !app.isPackaged;
 const VITE_URL = 'http://127.0.0.1:5173';
+
+const preloadPath = path.join(__dirname, 'preload.cjs');
 
 function settingsPath() {
   return path.join(app.getPath('userData'), 'palette-settings.json');
@@ -96,7 +98,7 @@ function createWindow() {
     vibrancy: process.platform === 'darwin' ? 'under-window' : undefined,
     visualEffectState: process.platform === 'darwin' ? 'active' : undefined,
     webPreferences: {
-      preload: path.join(__dirname, 'preload.js'),
+      preload: preloadPath,
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
@@ -111,6 +113,29 @@ function createWindow() {
 }
 
 app.whenReady().then(() => {
+  if (isDev) {
+    session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
+      if (!details.url.startsWith(VITE_URL)) {
+        callback({ responseHeaders: details.responseHeaders });
+        return;
+      }
+      const csp = [
+        "default-src 'self'",
+        "script-src 'self' 'unsafe-inline' 'unsafe-eval'",
+        "style-src 'self' 'unsafe-inline'",
+        "img-src 'self' data: blob:",
+        "font-src 'self' data:",
+        "connect-src 'self' http://127.0.0.1:5173 http://localhost:5173 ws://127.0.0.1:5173 ws://localhost:5173 wss://127.0.0.1:5173 wss://localhost:5173",
+      ].join('; ');
+      callback({
+        responseHeaders: {
+          ...details.responseHeaders,
+          'Content-Security-Policy': [csp],
+        },
+      });
+    });
+  }
+
   createWindow();
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
